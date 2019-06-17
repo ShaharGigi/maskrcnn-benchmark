@@ -25,6 +25,15 @@ from maskrcnn_benchmark.utils.imports import import_file
 from maskrcnn_benchmark.utils.logger import setup_logger
 from maskrcnn_benchmark.utils.miscellaneous import mkdir, save_config
 
+
+import missinglink
+
+# MissingLink credentials
+OWNER_ID = 'Fill in your owner id'
+PROJECT_TOKEN = 'Fill in your project token'
+
+missinglink_project = missinglink.PyTorchProject(owner_id=OWNER_ID, project_token=PROJECT_TOKEN)
+
 # See if we can use apex.DistributedDataParallel instead of the torch default,
 # and enable mixed-precision via apex.amp
 try:
@@ -32,7 +41,10 @@ try:
 except ImportError:
     raise ImportError('Use APEX for multi-precision via apex.amp')
 
-
+def scaled_loss(losses):
+    with amp.scale_loss(losses, optimizer) as scaled_losses:
+        return scaled_losses
+    
 def train(cfg, local_rank, distributed):
     model = build_detection_model(cfg)
     device = torch.device(cfg.MODEL.DEVICE)
@@ -74,16 +86,24 @@ def train(cfg, local_rank, distributed):
 
     checkpoint_period = cfg.SOLVER.CHECKPOINT_PERIOD
 
-    do_train(
+    with missinglink_project.create_experiment(
         model,
-        data_loader,
-        optimizer,
-        scheduler,
-        checkpointer,
-        device,
-        checkpoint_period,
-        arguments,
-    )
+        metrics={'loss':scaled_loss},
+        display_name='PyTorch convolutional neural network',
+        description='Two dimensional convolutional neural network') as experiment:
+        loss_function = experiment.metrics['loss']
+        
+        do_train(
+            model,
+            data_loader,
+            optimizer,
+            scheduler,
+            checkpointer,
+            device,
+            checkpoint_period,
+            arguments,
+            loss_function,
+        )
 
     return model
 
@@ -163,6 +183,7 @@ def main():
     if output_dir:
         mkdir(output_dir)
 
+        
     logger = setup_logger("maskrcnn_benchmark", output_dir, get_rank())
     logger.info("Using {} GPUs".format(num_gpus))
     logger.info(args)
@@ -180,7 +201,7 @@ def main():
     logger.info("Saving config into: {}".format(output_config_path))
     # save overloaded model config in the output directory
     save_config(cfg, output_config_path)
-
+    
     model = train(cfg, args.local_rank, args.distributed)
 
     if not args.skip_test:
