@@ -34,8 +34,7 @@ def reduce_loss_dict(loss_dict):
             all_losses /= world_size
         reduced_losses = {k: v for k, v in zip(loss_names, all_losses)}
     return reduced_losses
-
-
+    
 def do_train(
     model,
     data_loader,
@@ -45,6 +44,7 @@ def do_train(
     device,
     checkpoint_period,
     arguments,
+    scaled_loss,
 ):
     logger = logging.getLogger("maskrcnn_benchmark.trainer")
     logger.info("Start training")
@@ -80,8 +80,8 @@ def do_train(
         optimizer.zero_grad()
         # Note: If mixed precision is not used, this ends up doing nothing
         # Otherwise apply loss scaling for mixed-precision recipe
-        with amp.scale_loss(losses, optimizer) as scaled_losses:
-            scaled_losses.backward()
+        scaled_loss(losses).backward()
+        
         optimizer.step()
 
         batch_time = time.time() - end
@@ -121,3 +121,4 @@ def do_train(
             total_time_str, total_training_time / (max_iter)
         )
     )
+    
